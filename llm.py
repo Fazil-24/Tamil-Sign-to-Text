@@ -4,7 +4,7 @@ from google.genai import types
 
 # Create client ONCE
 client = genai.Client(
-    api_key="AIzaSyARxEtJrfIFhldxXW204HT_ykSRZTdtDUI" #place your gemini API key here"
+    api_key=" " #place your gemini API key here"
 )
 
 MODEL_NAME = "gemini-3-flash-preview"  # Change the model based on cost
@@ -55,3 +55,4 @@ Task:
     else:
         # Return the original text if API fails
         return text
+
