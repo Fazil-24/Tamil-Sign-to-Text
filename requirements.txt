@@ -1,0 +1,8 @@
+opencv-python
+ultralytics
+mediapipe
+flask
+gTTS
+google-genai
+tqdm
+scikit-learn
