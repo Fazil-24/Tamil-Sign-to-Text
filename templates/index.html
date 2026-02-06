@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+    <meta charset="UTF-8">
+    <title>Tamil Hand Sign Recognition</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<h2 class="title">Tamil Hand Sign Recognition System</h2>
+
+<div class="container">
+
+    <!-- LEFT -->
+    <div class="left">
+        <h3>Live Detection</h3>
+        <img id="video" width="100%">
+        <br><br>
+        <button onclick="startCam()">▶ Start</button>
+        <button onclick="stopCam()">⏹ Stop</button>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="right">
+        <p><b>Detected Letters</b></p>
+        <div class="box" id="previous">—</div>
+
+        <p><b>Current Letter</b></p>
+        <div class="box current" id="current">—</div>
+
+        <p><b>Final Sentence</b></p>
+        <div class="box highlight" id="sentence">—</div>
+
+        <button onclick="finalize()">✔ Finalize Word</button>
+        <button onclick="speak()">🔊 Speak</button>
+
+        <audio id="audio" src="/static/output.mp3"></audio>
+    </div>
+
+</div>
+
+<script>
+let polling = null;
+
+async function startCam() {
+    await fetch("/start_camera", { method: "POST" });
+    document.getElementById("video").src = "/video_feed";
+    polling = setInterval(poll, 700);
+}
+
+async function stopCam() {
+    await fetch("/stop_camera", { method: "POST" });
+    document.getElementById("video").src = "";
+    clearInterval(polling);
+}
+
+async function finalize() {
+    const res = await fetch("/finalize_word", { method: "POST" });
+    const data = await res.json();
+    document.getElementById("sentence").innerText = data.sentence;
+}
+
+
+async function speak() {
+    const res = await fetch("/speak", { method: "POST" });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+
+    const audio = new Audio(url);
+    audio.play();
+}
+
+
+async function poll() {
+    const res = await fetch("/status");
+    const data = await res.json();
+    document.getElementById("previous").innerText = data.previous;
+    document.getElementById("current").innerText = data.current;
+    document.getElementById("sentence").innerText = data.sentence;
+}
+</script>
+
+</body>
+</html>
