@@ -6,3 +6,4 @@ google-genai
 tqdm
 scikit-learn
 python-dotenv
+gunicorn
