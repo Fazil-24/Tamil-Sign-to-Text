@@ -14,7 +14,12 @@
     <!-- LEFT -->
     <div class="left">
         <h3>Live Detection</h3>
-        <img id="video" width="100%">
+        <div style="position: relative; display: inline-block;">
+            <video id="video" autoplay playsinline width="100%"></video>
+            <canvas id="overlay" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+        </div>
+        <canvas id="canvas" hidden></canvas>
+
         <br><br>
         <button onclick="startCam()">▶ Start</button>
         <button onclick="stopCam()">⏹ Stop</button>
@@ -40,18 +45,93 @@
 </div>
 
 <script>
-let polling = null;
+let video = document.getElementById("video");
+let canvas = document.getElementById("canvas");
+let ctx = canvas.getContext("2d");
+let overlay = document.getElementById("overlay");
+let overlayCtx = overlay.getContext("2d");
+let stream = null;
+let interval = null;
 
 async function startCam() {
-    await fetch("/start_camera", { method: "POST" });
-    document.getElementById("video").src = "/video_feed";
-    polling = setInterval(poll, 700);
+    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+
+    // Wait for video to be ready and set overlay canvas size
+    video.onloadedmetadata = () => {
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+    };
+
+    interval = setInterval(captureAndSend, 700);
 }
 
-async function stopCam() {
-    await fetch("/stop_camera", { method: "POST" });
-    document.getElementById("video").src = "";
-    clearInterval(polling);
+function stopCam() {
+    if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+    }
+    clearInterval(interval);
+    // Clear overlay
+    overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+}
+
+function drawBoundingBoxes(boxes) {
+    // Clear previous boxes
+    overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+    // Draw each box
+    boxes.forEach(box => {
+        // Calculate scaling factors
+        const scaleX = overlay.width / canvas.width;
+        const scaleY = overlay.height / canvas.height;
+
+        const x1 = box.x1 * scaleX;
+        const y1 = box.y1 * scaleY;
+        const x2 = box.x2 * scaleX;
+        const y2 = box.y2 * scaleY;
+
+        // Draw rectangle
+        overlayCtx.strokeStyle = "#00FF00";
+        overlayCtx.lineWidth = 3;
+        overlayCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+        // Draw label background
+        const label = `${box.label} ${box.confidence.toFixed(2)}`;
+        overlayCtx.font = "16px Arial";
+        const textWidth = overlayCtx.measureText(label).width;
+        overlayCtx.fillStyle = "#00FF00";
+        overlayCtx.fillRect(x1, y1 - 25, textWidth + 10, 25);
+
+        // Draw label text
+        overlayCtx.fillStyle = "#000000";
+        overlayCtx.fillText(label, x1 + 5, y1 - 7);
+    });
+}
+
+async function captureAndSend() {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    ctx.drawImage(video, 0, 0);
+    const image = canvas.toDataURL("image/jpeg");
+
+    const res = await fetch("/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image })
+    });
+
+    const data = await res.json();
+    document.getElementById("previous").innerText = data.previous;
+    document.getElementById("current").innerText = data.current;
+    document.getElementById("sentence").innerText = data.sentence;
+
+    // Draw bounding boxes if present
+    if (data.boxes && data.boxes.length > 0) {
+        drawBoundingBoxes(data.boxes);
+    } else {
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+    }
 }
 
 async function finalize() {
@@ -60,23 +140,11 @@ async function finalize() {
     document.getElementById("sentence").innerText = data.sentence;
 }
 
-
 async function speak() {
     const res = await fetch("/speak", { method: "POST" });
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-
-    const audio = new Audio(url);
-    audio.play();
-}
-
-
-async function poll() {
-    const res = await fetch("/status");
-    const data = await res.json();
-    document.getElementById("previous").innerText = data.previous;
-    document.getElementById("current").innerText = data.current;
-    document.getElementById("sentence").innerText = data.sentence;
+    new Audio(url).play();
 }
 </script>
 
