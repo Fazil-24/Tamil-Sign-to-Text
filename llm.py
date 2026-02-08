@@ -1,11 +1,13 @@
 import os
 from google import genai
 from google.genai import types
-
+from dotenv import load_dotenv
+load_dotenv()
 # Create client ONCE
 client = genai.Client(
-    api_key=" " #place your gemini API key here"
+    api_key=os.getenv("GEMINI_API_KEY")  # Set GEMINI_API_KEY environment variable
 )
+
 
 MODEL_NAME = "gemini-3-flash-preview"  # Change the model based on cost
 
@@ -55,4 +57,5 @@ Task:
     else:
         # Return the original text if API fails
         return text
+
 
