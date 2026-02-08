@@ -1,6 +1,5 @@
-opencv-python
-ultralytics
-mediapipe
+opencv-python-headless
+onnxruntime
 flask
 gTTS
 google-genai
