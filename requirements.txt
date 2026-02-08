@@ -5,3 +5,4 @@ gTTS
 google-genai
 tqdm
 scikit-learn
+python-dotenv
