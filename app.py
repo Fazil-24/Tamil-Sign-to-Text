@@ -1,11 +1,14 @@
 import cv2
-from flask import Flask, render_template, Response, jsonify, send_file
+from flask import Flask, render_template, Response, jsonify, send_file, request
 import io
 import numpy as np
 import onnxruntime as ort
 from gtts import gTTS
 from tamil_map import TAMIL_MAP
 from llm import guess_tamil_word
+import base64
+from PIL import Image
+
 
 app = Flask(__name__)
 
@@ -17,7 +20,6 @@ input_name = session.get_inputs()[0].name
 input_shape = session.get_inputs()[0].shape
 img_height, img_width = int(input_shape[2]), int(input_shape[3])
 
-camera_running = False
 current_letter = ""
 final_letters = []
 sentence_words = []
@@ -62,51 +64,6 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
     
     return img, r, (dw, dh)
 
-def gen_frames():
-    global camera_running, current_letter, final_letters
-
-    cap = cv2.VideoCapture(0)
-
-    while camera_running:
-        success, frame = cap.read()
-        if not success:
-            break
-
-        original_img = frame.copy()
-        img_height_orig, img_width_orig = original_img.shape[:2]
-        
-        # Preprocess
-        input_tensor = preprocess_image(original_img, (img_height, img_width))
-        
-        # Run inference
-        outputs = session.run(None, {input_name: input_tensor})[0]
-        
-        # Post-process
-        detected = ""
-        boxes = postprocess(outputs, img_width_orig, img_height_orig, img_width, img_height, conf_threshold=0.6)
-        
-        for box in boxes:
-            x1, y1, x2, y2, conf, cls_id = box
-            cls_id = int(cls_id) + 1
-            detected = TAMIL_MAP.get(cls_id, "")
-            
-            # Draw bounding box
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            cv2.putText(frame, f"{detected} {conf:.2f}", (int(x1), int(y1)-10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-        # ---- collapse repeated letters ----
-        if detected:
-            if not final_letters or detected != final_letters[-1]:
-                final_letters.append(detected)
-            current_letter = detected
-
-        _, buffer = cv2.imencode(".jpg", frame)
-        yield (b"--frame\r\n"
-               b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n")
-
-    cap.release()
-
 def postprocess(output, img_width, img_height, input_width, input_height, conf_threshold=0.6):
     """Post-process YOLO ONNX output"""
     # Output shape: (1, 252, 8400) -> (8400, 252)
@@ -146,25 +103,6 @@ def postprocess(output, img_width, img_height, input_width, input_height, conf_t
 def index():
     return render_template("index.html")
 
-@app.route("/start_camera", methods=["POST"])
-def start_camera():
-    global camera_running, final_letters, current_letter
-    camera_running = True
-    final_letters = []
-    current_letter = ""
-    return jsonify({"status": "started"})
-
-@app.route("/stop_camera", methods=["POST"])
-def stop_camera():
-    global camera_running
-    camera_running = False
-    return jsonify({"status": "stopped"})
-
-@app.route("/video_feed")
-def video_feed():
-    return Response(gen_frames(),
-                    mimetype="multipart/x-mixed-replace; boundary=frame")
-
 @app.route("/status")
 def status():
     return jsonify({
@@ -202,3 +140,71 @@ def speak():
         as_attachment=False
     )
 
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    global current_letter, final_letters
+
+    data = request.json
+    if "image" not in data:
+        return jsonify({"error": "No image"}), 400
+
+    # Decode base64 image
+    image_data = data["image"].split(",")[1]
+    image_bytes = base64.b64decode(image_data)
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+    frame = np.array(img)
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+    # --- inference ---
+    input_tensor = preprocess_image(frame, (img_height, img_width))
+    outputs = session.run(None, {input_name: input_tensor})[0]
+
+    detected = ""
+    boxes = postprocess(
+        outputs,
+        frame.shape[1],
+        frame.shape[0],
+        img_width,
+        img_height,
+        conf_threshold=0.6
+    )
+
+    # Collect all boxes with labels for display
+    display_boxes = []
+    detected = ""
+    
+    for i, box in enumerate(boxes):
+        x1, y1, x2, y2, conf, cls_id = box
+        cls_id = int(cls_id) + 1
+        label = TAMIL_MAP.get(cls_id, "")
+        
+        display_boxes.append({
+            "x1": int(x1),
+            "y1": int(y1),
+            "x2": int(x2),
+            "y2": int(y2),
+            "label": label,
+            "confidence": float(conf)
+        })
+        
+        # Use first detection for current letter
+        if i == 0:
+            detected = label
+
+    if detected:
+        if not final_letters or detected != final_letters[-1]:
+            final_letters.append(detected)
+        current_letter = detected
+
+    return jsonify({
+        "current": current_letter,
+        "previous": "".join(final_letters),
+        "sentence": " ".join(sentence_words),
+        "boxes": display_boxes
+    })
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
